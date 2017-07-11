@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:camel="http://camel.apache.org/schema/spring" 
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+	xmlns:broker="http://activemq.apache.org/schema/core"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans 
+       		http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+       		http://camel.apache.org/schema/spring 
+       		http://camel.apache.org/schema/spring/camel-spring.xsd
+       		http://www.springframework.org/schema/context 
+       		http://www.springframework.org/schema/context/spring-context-2.5.xsd
+       		http://activemq.apache.org/schema/core 
+       		http://activemq.apache.org/schema/core/activemq-core.xsd">
+
+
+	<context:component-scan base-package="com.iqmsoft.camel.spark" />
+	<bean id="mySlip" class="com.iqmsoft.camel.spark.DynamicRouter" />
+
+	<broker id="broker" brokerName="myBroker" useShutdownHook="false"
+		useJmx="true" persistent="true" dataDirectory="activemq-data"
+		xmlns="http://activemq.apache.org/schema/core">
+		<broker:transportConnectors>
+			<!-- expose a VM transport for in-JVM transport between AMQ and Camel 
+				on the server side -->
+			<broker:transportConnector name="brokerURL"
+				uri="vm://myBroker" />
+			<!-- expose a TCP transport for clients to use -->
+			<broker:transportConnector name="tcp"
+				uri="tcp://localhost:61616" />
+		</broker:transportConnectors>
+	</broker>
+
+	<!-- lets configure the Camel ActiveMQ to use the embedded ActiveMQ broker 
+		declared above -->
+	<bean id="jms" class="org.apache.activemq.camel.component.ActiveMQComponent">
+		<property name="brokerURL"
+			value="vm://myBroker?create=false&amp;waitForStart=5000" />
+	</bean>
+
+	<camelContext trace="false"
+		xmlns="http://camel.apache.org/schema/spring">
+		<restConfiguration component="spark-rest"
+			bindingMode="json" />
+		<rest path="/company" customId="true" id="rs_company">
+			<get uri="/view/{id}" outType="com.iqmsoft.camel.spark.Company">
+				<to uri="bean:companyService?method=getCompany(${header.id})" />
+			</get>
+			<get uri="/list" outType="com.iqmsoft.camel.spark.Company">
+				<to uri="bean:companyService?method=listCompanies" />
+			</get>
+			<put uri="/new" type="com.iqmsoft.camel.spark.Company" customId="true"
+				id="newCompany">
+				<to uri="direct:start" />
+			</put>
+			<get uri="/ratio" outType="Double">
+				<to uri="bean:companyService?method=getRatio" />
+			</get>
+			<put uri="/ratio" type="Double">
+				<to uri="bean:companyService?method=setRatio" />
+			</put>
+		</rest>
+		<route>
+			<from uri="direct:start" id="startNewCompany">
+				<description />
+			</from>
+			<log message="[startNewCompany] Message: ${body}" />
+			<bean ref="companyService" method="addCompany"
+				beanType="com.iqmsoft.camel.spark.interfaces.ICompanyService" />
+			<dynamicRouter id="debtSelector">
+				<method bean="mySlip" ref="mySlip" method="slip"></method>
+			</dynamicRouter>
+		</route>
+		<route>
+			<from uri="direct:profitCompany" />
+			<log message="[profitCompany] Input Message: ${body}" />
+			<to uri="jms:queue:profitCompanyInbox?exchangePattern=InOnly" />
+		</route>
+		<route>
+			<from uri="direct:nonProfitCompany" />
+			<log message="[nonProfitCompany] Input Message: ${body}" />
+			<to uri="jms:queue:nonProfitCompanyInbox?exchangePattern=InOnly" />
+		</route>
+	</camelContext>
+</beans> 
